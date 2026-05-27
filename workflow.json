@@ -1,0 +1,461 @@
+{
+  "name": "AI Support Triage Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "custom",
+              "cronExpression": "* * * * * "
+            }
+          ]
+        },
+        "filters": {
+          "labelIds": [
+            "INBOX"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -816,
+        0
+      ],
+      "id": "eeadcd5c-6229-4b88-817c-b4d58a9483a4",
+      "name": "Gmail Trigger",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "UguNra9yjRteITBN",
+          "name": "Gmail OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cfb5cb52-519f-4b0f-9541-036bffa2d54f",
+              "leftValue": "={{ $json.From }}",
+              "rightValue": "=saurabhpingale2804@gmail.com",
+              "operator": {
+                "type": "string",
+                "operation": "notContains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -608,
+        0
+      ],
+      "id": "19a7d181-d2a8-4dd3-80ce-146f060e27b1",
+      "name": "Filter Out Sent/Own Emails"
+    },
+    {
+      "parameters": {
+        "jsCode": "const email = $input.first().json;\n\n// With Simplify ON, Gmail returns 'from' as a plain string\n// like \"John Doe <john@example.com>\" or just \"john@example.com\"\nconst rawFrom = email.from || email.payload?.headers?.find(h => h.name === 'From')?.value || '';\n\n// Parse name and email from the from string\nconst fromMatch = rawFrom.match(/^(.*?)\\s*<(.+?)>$/) || rawFrom.match(/^(.+)$/);\nconst fromEmail = fromMatch ? (fromMatch[2] || fromMatch[1] || '').trim() : rawFrom.trim();\nconst fromName = fromMatch && fromMatch[2] ? fromMatch[1].trim() : fromEmail.split('@')[0];\n\nconst subject = email.subject || '(no subject)';\nconst body = email.text || email.snippet || email.body || '';\nconst cleanBody = body.replace(/<[^>]*>/g, '').substring(0, 1500);\n\nreturn [{\n  json: {\n    messageId: email.id || email.messageId || '',\n    from: fromEmail,\n    fromName: fromName || 'Unknown',\n    subject: subject,\n    body: cleanBody,\n    receivedAt: new Date().toISOString(),\n    threadId: email.threadId || email.id || ''\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -336,
+        -16
+      ],
+      "id": "637597dd-8db5-4667-96f2-b7c8ad016a67",
+      "name": "Extract & Clean Email Content"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=AIzaSyClzbg6p18qnHopI55iJ-CXqN-f4o00RGU",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\n  \"Content-Type\": \"application/json\"\n}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"You are a support email triage agent. Analyze this email and respond with ONLY valid JSON, no markdown, no code fences.\\n\\nEmail From: {{ $json.fromName }} <{{ $json.from }}>\\nSubject: {{ $json.subject }}\\nBody: {{ $json.body }}\\n\\nRespond with this exact JSON structure:\\n{\\n  \\\"category\\\": \\\"billing|technical|general|spam|refund\\\",\\n  \\\"priority\\\": \\\"high|medium|low\\\",\\n  \\\"confidence\\\": 0.95,\\n  \\\"requires_human\\\": false,\\n  \\\"reason\\\": \\\"one sentence explanation\\\",\\n  \\\"auto_reply\\\": \\\"full reply text if requires_human is false, else null\\\",\\n  \\\"summary\\\": \\\"10 word summary of the issue\\\"\\n}\\n\\nAuto-reply rules:\\n- SET requires_human: false AND write a helpful auto_reply for these: pricing questions, plan information, free tier or free plan questions, business hours, how-to questions, password reset instructions, general product information, feature inquiries.\\n- SET requires_human: true AND set auto_reply to null for these: refund requests, billing disputes, double charges, account access issues, login problems, software bugs, complaints, anything requiring account lookup or payment processing.\\n\\nFor pricing or free plan questions use this auto_reply template:\\n\\\"Hi [fromName],\\\\n\\\\nThank you for your interest! We offer flexible pricing plans to suit different needs. Please visit our website for current pricing details, or reply to this email and our team will provide you with a personalized quote.\\\\n\\\\nBest regards,\\\\nSupport Team\\\"\\n\\nFor password reset use this auto_reply template:\\n\\\"Hi [fromName],\\\\n\\\\nTo reset your password, please click the Forgot Password link on the login page and follow the instructions sent to your registered email.\\\\n\\\\nBest regards,\\\\nSupport Team\\\"\\n\\nIMPORTANT: Replace [fromName] with the actual name from the email. Always return valid JSON only.\"\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"temperature\": 0.1,\n    \"maxOutputTokens\": 800,\n    \"responseMimeType\": \"application/json\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -96,
+        -16
+      ],
+      "id": "ee21413e-5106-40af-a0b4-b0143ca584bc",
+      "name": "AI Classification & Draft Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "const aiResponse = $input.first().json;\n\n// Gemini response path is different from Anthropic\nconst rawText = aiResponse.candidates[0].content.parts[0].text;\n\n// Strip markdown code fences if present\nconst clean = rawText.replace(/```json\\n?|\\n?```/g, '').trim();\n\nlet parsed;\ntry {\n  parsed = JSON.parse(clean);\n} catch(e) {\n  parsed = {\n    category: 'general',\n    priority: 'medium',\n    confidence: 0.5,\n    requires_human: true,\n    reason: 'Parse error - defaulting to human review',\n    auto_reply: null,\n    summary: 'Unable to classify'\n  };\n}\n\n// Merge with original email data\nconst email = $('Extract & Clean Email Content').first().json;\n\nreturn [{\n  json: {\n    ...email,\n    ...parsed\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        -16
+      ],
+      "id": "b3b91964-db1a-4a0e-8501-f9d1cabff6c8",
+      "name": "Parse AI Response"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.requires_human }}",
+                    "rightValue": "false",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "b5b3b58e-4501-4dba-8109-c485b0a83f59"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Auto Reply"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "5424611b-8006-484e-9612-34d80c1f1b0e",
+                    "leftValue": "={{ $json.requires_human }}",
+                    "rightValue": "true",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Human Required"
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        320,
+        -16
+      ],
+      "id": "884aed1f-38df-4bc6-8df7-5b1a631abbeb",
+      "name": "Route by Human Required"
+    },
+    {
+      "parameters": {
+        "operation": "reply",
+        "messageId": "={{ $json.messageId }}",
+        "emailType": "text",
+        "message": "=Hi {{ $json.fromName }},\n\n{{ $json.auto_reply }}\n\nBest regards,\nSupport Team\n\n---\n[This response was generated automatically. Reply to this email if you need further assistance.]",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        592,
+        -112
+      ],
+      "id": "02effb8d-307f-4b2f-9e90-0f73f420429c",
+      "name": "Send AI-Drafted Reply",
+      "webhookId": "0f5a2227-7d48-49cc-b5e5-397d071adbf9",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "UguNra9yjRteITBN",
+          "name": "Gmail OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "saurabhpingale2804@gmail.com",
+        "subject": "=[{{ $json.priority }}] New Support Request: {{ $json.summary }}",
+        "emailType": "text",
+        "message": "=🚨 New support email requires your attention.\n\nFROM: {{ $json.fromName }} <{{ $json.from }}>\nSUBJECT: {{ $json.subject }}\nCATEGORY: {{ $json.category }}\nPRIORITY: {{ $json.priority }}\nREASON FOR ESCALATION: {{ $json.reason }}\n\nORIGINAL MESSAGE:\n{{ $json.body }}\n\n---\nReply directly to {{ $json.from }} to respond.",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        608,
+        80
+      ],
+      "id": "643ecb36-da18-4097-bc87-ebebdc636548",
+      "name": "Send Internal Alert Message",
+      "webhookId": "afeec29f-0350-4596-bbb9-bfad62f262c6",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "UguNra9yjRteITBN",
+          "name": "Gmail OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1AJ7OLlVEyY58m2yA5xF6o0kyFf7ZdN1NOwNl-HckowI/edit?usp=sharing",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $json.receivedAt }}",
+            "From": "={{ $json.from }}",
+            "Subject": "={{ $json.subject }}",
+            "Category": "={{ $json.category }}",
+            "Priority": "={{ $json.priority }}",
+            "AI Response Sent": "={{ $json.requires_human == true ? 'No' : 'Yes' }}",
+            "Human Required": "={{ $json.requires_human == true ? 'Yes' : 'No' }}",
+            "Resolution": "=Pending"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Timestamp",
+              "displayName": "Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "From",
+              "displayName": "From",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Subject",
+              "displayName": "Subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Category",
+              "displayName": "Category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Priority",
+              "displayName": "Priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "AI Response Sent",
+              "displayName": "AI Response Sent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Human Required",
+              "displayName": "Human Required",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Resolution",
+              "displayName": "Resolution",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        864,
+        -16
+      ],
+      "id": "b61c466d-c7f1-44a4-adb9-e3ac1c4cdb26",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "9w6mpLMDXilRI3Rh",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Filter Out Sent/Own Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Out Sent/Own Emails": {
+      "main": [
+        [
+          {
+            "node": "Extract & Clean Email Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract & Clean Email Content": {
+      "main": [
+        [
+          {
+            "node": "AI Classification & Draft Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Classification & Draft Response": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "Route by Human Required",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Human Required": {
+      "main": [
+        [
+          {
+            "node": "Send AI-Drafted Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Internal Alert Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send AI-Drafted Reply": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Internal Alert Message": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "7387af9f-9ab1-4096-91ee-f143030b5ec3",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "6c3545a72256c4770293c82a6796f2e8cae29d09f1d36fa672f9bef3e011b345"
+  },
+  "id": "pL4HBhqPMiAk8IWk",
+  "tags": []
+}
